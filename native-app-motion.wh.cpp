@@ -1,8 +1,8 @@
 // ==WindhawkMod==
 // @id              native-app-motion
 // @name            Native-style App Motion
-// @description     GPU-composited app transitions with cooperative taskbar restores and diagnostic fallback logs.
-// @version         0.3.0
+// @description     Native-style GPU app transitions with a 60 Hz preset and synchronized window handoffs.
+// @version         0.3.1
 // @author          Native App Motion contributors
 // @license         MIT
 // @include         *
@@ -27,7 +27,7 @@
 This is the APP OPEN/CLOSE/RESTORE mod. The older native-smooth-taskbar file is a
 separate taskbar experiment; it is not needed for this mod.
 
-Version 0.3.0 is experimental and has not been run on a real Windows desktop in
+Version 0.3.1 is experimental and has not been run on a real Windows desktop in
 the development environment. Cross-compilation is not a visual or compatibility
 test. No zero-stutter, zero-bug, FPS or battery-life guarantee is made.
 
@@ -41,6 +41,11 @@ Opening uses a live DWM thumbnail while the real window is temporarily cloaked.
 The app continues to paint. The renderer updates thumbnail position/opacity on
 composition boundaries only while openings are active. A one-shot watchdog in
 the source process restores the real window if the renderer fails or stops.
+Version 0.3.1 presents the final thumbnail and then the real source before
+removing the overlay or restoring native transitions. Redundant show/no-op
+layout calls preserve the animation. Repeated startup hide/show cycles do not
+replay the custom launch effect on the same window. If Explorer cannot finish
+the handoff, it asks the existing source recovery worker to finish locally.
 
 Closing captures the unobscured window once and uploads it once. DirectComposition
 then runs the fade/scale curves on the GPU. The renderer lives in Explorer, so a
@@ -52,7 +57,7 @@ Version 0.3 adds supported taskbar restoration of minimized windows. Explorer's
 native SwitchTo routine is scoped through one optional symbol hook; intercepted
 restore APIs forward a small request to the confirmed source UI dispatcher.
 This path adds no capture or animation-completion wait to the taskbar thread.
-Restore defaults are a 110 ms ease-out and 35% first-frame visibility. A deadline
+Restore defaults are a 100 ms ease-out and 50% first-frame visibility. A deadline
 watchdog handles unclaimed requests; an atomic claim prevents duplicate restores
 that could otherwise unmaximize a window. New input can cancel stale requests.
 
@@ -72,7 +77,18 @@ with this WHOLE file and compile it. Enable it after Explorer is running. Restar
 test apps so Windhawk can inject the mod. The Explorer renderer and app hooks
 must both be loaded. Disable other window-animation replacement mods first.
 
-Start with the default settings. Test Notepad, a browser and the apps you actually
+Use Motion preset: Balanced 60 Hz (recommended). It applies 133 ms opening,
+100 ms close/restore, 50% restore starting visibility, 97% scale, ease-out,
+2 simultaneous effects, a 2 MP capture limit, a 34 ms close preparation deadline,
+15 seconds GPU idle release and native effects on battery. This preserves full
+1360x768 capture resolution; it is a starting preset, not a benchmarked optimum.
+These are curve/deadline values, not measured total input-to-display times.
+Saved individual tuning fields are inactive until Custom settings is selected.
+Feature toggles, exclusions and logging remain independent. After upgrading from
+0.3.0, restart Windows once so Explorer and all apps load the same version.
+Update the existing mod; do not enable a second copy.
+
+Test Notepad, a browser and the apps you actually
 use. Keep Windows Animation effects enabled. Protected apps, different integrity
 levels, custom taskbar/shell replacements, direct process termination and APIs
 that bypass the hooks can fall back or remain native. Elevated apps can use their
@@ -93,7 +109,7 @@ the newer action. Disable/reload restores windows cloaked by this mod.
 
 Use diagnostics to distinguish a custom animation from a native fallback. Enable
 Diagnostic logging and Windhawk logging, restart the test app, minimize it, then
-click its taskbar button. Confirm TASKBAR_HOOK_READY, BROKER_READY protocol=0.3,
+click its taskbar button. Confirm TASKBAR_HOOK_READY, BROKER_READY protocol=0.3.1,
 CLIENT_READY, TASKBAR_RESTORE_QUEUED, RESTORE_RECEIVED and RESTORE_ANIMATION_STARTED.
 If the last line is absent, read the TASKBAR_NATIVE/RENDERER_NATIVE explanation.
 TASKBAR_DISPATCH duration is API time, not click-to-frame latency. Optional taskbar
@@ -104,6 +120,12 @@ this restore path native; no offsets are guessed.
 
 // ==WindhawkModSettings==
 /*
+- motionPreset: balanced60
+  $name: Motion preset
+  $description: Balanced 60 Hz applies the timing/resource values together, including after updating an older version. Select Custom to use the individual tuning fields below. Animation toggles, exclusions and logging remain independent.
+  $options:
+  - balanced60: Balanced 60 Hz (recommended)
+  - custom: Custom settings
 - animateOpen: true
   $name: Animate app opening
   $description: Recreate the Windows-style fade/scale using a live GPU-composited window thumbnail. Experimental; test on your Windows build.
@@ -113,47 +135,47 @@ this restore path native; no offsets are guessed.
 - animateRestore: true
   $name: Animate restoration from the taskbar
   $description: Restore supported minimized apps through their UI thread and apply a fast-start GPU fade/scale. Requires the new version in Explorer and the target app. Native fallback is used when routing is unavailable.
-- restoreDurationMs: 110
-  $name: Taskbar restore duration (ms)
+- restoreDurationMs: 100
+  $name: Custom - Taskbar restore duration (ms)
   $description: Clamped to 60–250 ms. Changes transition pace, not how quickly a busy app can render.
-- restoreStartOpacityPercent: 35
-  $name: Restore first-frame visibility (%)
+- restoreStartOpacityPercent: 50
+  $name: Custom - Restore first-frame visibility (%)
   $description: Clamped to 0–100. A visible initial frame gives earlier visual feedback instead of starting completely transparent.
-- restoreDispatchTimeoutMs: 60
-  $name: Restore request dispatch deadline (ms)
+- restoreDispatchTimeoutMs: 50
+  $name: Custom - Restore request dispatch deadline (ms)
   $description: Clamped to 20–120. If the app has not claimed a queued restore by this deadline, the renderer submits a native restore. A claimed request is never submitted twice.
-- openDurationMs: 150
-  $name: Opening duration (ms)
+- openDurationMs: 133
+  $name: Custom - Opening duration (ms)
   $description: Clamped to 80–400 ms. Longer animations are not inherently smoother.
-- closeDurationMs: 120
-  $name: Closing duration (ms)
+- closeDurationMs: 100
+  $name: Custom - Closing duration (ms)
   $description: Clamped to 60–350 ms. The source app does not wait for this whole duration.
-- scalePercent: 96
-  $name: Smallest window scale (%)
-  $description: 96 approximates Windows' subtle scale effect. 100 gives fade only. Clamped to 90–100.
-- easing: smooth
-  $name: Opening and closing motion curve
+- scalePercent: 97
+  $name: Custom - Smallest window scale (%)
+  $description: 97 gives a subtle Windows-style scale effect. 100 gives fade only. Clamped to 90–100.
+- easing: out
+  $name: Custom - Opening and closing motion curve
   $options:
   - smooth: Smooth start and finish
   - out: Fast start, gentle finish
   - linear: Linear
 - maxConcurrent: 2
-  $name: Maximum simultaneous animations
+  $name: Custom - Maximum simultaneous animations
   $description: Clamped to 1–4. Additional requests use native behavior.
-- snapshotMegapixels: 4
-  $name: Maximum closing snapshot size (megapixels)
+- snapshotMegapixels: 2
+  $name: Custom - Maximum closing snapshot size (megapixels)
   $description: Clamped to 1–8. Larger windows are downscaled; this limits CPU upload and texture size. A short fade may look softer on very large windows.
-- handoffTimeoutMs: 40
-  $name: Maximum closing renderer handoff wait (ms)
+- handoffTimeoutMs: 34
+  $name: Custom - Maximum closing renderer handoff wait (ms)
   $description: Clamped to 8–80. A slow renderer falls back to the native close. This excludes capture/native API execution time.
 - gpuIdleSeconds: 15
-  $name: Release closing GPU resources after idle (seconds)
+  $name: Custom - Release closing GPU resources after idle (seconds)
   $description: Clamped to 1–120. Releases the closing renderer's device when unused. A later cold start may use native closing if it misses the handoff deadline.
 - animateTrayHides: false
   $name: Also animate explicit hides
   $description: Applies to ShowWindow(SW_HIDE) and SetWindowPos hide requests. Off avoids treating ordinary visibility changes as closes.
-- disableOnBattery: false
-  $name: Use native animations on battery
+- disableOnBattery: true
+  $name: Custom - Use native animations on battery
   $description: Skip this mod's effects while Windows reports battery power. No power-plan settings are changed.
 - respectAnimationEffects: true
   $name: Respect Windows animation preferences
@@ -210,14 +232,35 @@ bool AcceptOrCancel(CompareExchange compareExchange) {
     return compareExchange(Cancelled,Pending)==Ready;
 }
 template <typename Platform>
-void RestoreOpening(Platform& platform) {
-    if (!platform.Claim()) return;
-    if (!platform.OwnsGeneration()) return;
+bool RestoreOpening(Platform& platform) {
+    if (!platform.Claim()) return false;
+    if (!platform.OwnsGeneration()) return false;
+    // On normal completion, present the full-size, opaque thumbnail first.
+    // Keep it in place and transitions suppressed until the real source has
+    // also been presented. Recovery/cancellation adapters can skip the waits.
+    platform.PresentFinalFrame();
     const bool visible=platform.Uncloak();
+    if (visible) platform.PresentSource();
     const bool preferences=platform.RestoreTransitions();
-    if (!visible || !preferences) { platform.ReleaseClaim(); return; }
+    if (!visible || !preferences) { platform.ReleaseClaim(); return false; }
     platform.RemoveToken();
+    return true;
 }
+struct Rect { int left,top,right,bottom; };
+constexpr bool ChangesGeometry(Rect before,int x,int y,int width,int height,bool move,bool size) {
+    return (move && (before.left!=x || before.top!=y)) ||
+           (size && (static_cast<long long>(before.right)-before.left!=width ||
+                     static_cast<long long>(before.bottom)-before.top!=height));
+}
+struct Tuning {
+    int openMs,closeMs,restoreMs,restoreOpacity,restoreDispatchMs;
+    int scale,concurrent,megapixels,handoffMs,idleSeconds;
+    Curve curve;
+    bool battery;
+};
+// 8 opening intervals / 6 closing and restore intervals at 60 Hz, before
+// presentation handoff. A 2 MP cap preserves a 1360x768 capture at full size.
+constexpr Tuning Balanced60{133,100,100,50,50,97,2,2,34,15,Curve::Out,true};
 constexpr int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 inline float Ease(float t, Curve curve) {
     t = std::clamp(t, 0.0f, 1.0f);
@@ -279,14 +322,15 @@ constexpr bool ValidImage(int width, int height, std::uint64_t bytes) {
 
 namespace {
 using Microsoft::WRL::ComPtr;
-constexpr wchar_t kBrokerClass[] = L"NativeAppMotion.Broker.030.8F23A10C";
-constexpr wchar_t kOverlayClass[] = L"NativeAppMotion.Overlay.030.8F23A10C";
-constexpr wchar_t kOpenToken[] = L"NativeAppMotion.OpenToken.030.8F23A10C";
-constexpr wchar_t kTransitionPreference[] = L"NativeAppMotion.Transitions.030.8F23A10C";
-constexpr wchar_t kClientReady[] = L"NativeAppMotion.ClientReady.030.8F23A10C";
-constexpr wchar_t kRestorePending[] = L"NativeAppMotion.RestorePending.030.8F23A10C";
-constexpr wchar_t kAffinityPreference[] = L"NativeAppMotion.Affinity.030.8F23A10C";
-constexpr std::uintptr_t kClientVersion=0x4E414D03;
+constexpr wchar_t kBrokerClass[] = L"NativeAppMotion.Broker.031.8F23A10C";
+constexpr wchar_t kOverlayClass[] = L"NativeAppMotion.Overlay.031.8F23A10C";
+constexpr wchar_t kOpenToken[] = L"NativeAppMotion.OpenToken.031.8F23A10C";
+constexpr wchar_t kTransitionPreference[] = L"NativeAppMotion.Transitions.031.8F23A10C";
+constexpr wchar_t kClientReady[] = L"NativeAppMotion.ClientReady.031.8F23A10C";
+constexpr wchar_t kRestorePending[] = L"NativeAppMotion.RestorePending.031.8F23A10C";
+constexpr wchar_t kAffinityPreference[] = L"NativeAppMotion.Affinity.031.8F23A10C";
+constexpr wchar_t kShownOnce[] = L"NativeAppMotion.ShownOnce.031.8F23A10C";
+constexpr std::uintptr_t kClientVersion=0x4E414D04;
 constexpr UINT kRequest = WM_APP+0x471;
 constexpr UINT kStartClose = WM_APP+0x472;
 constexpr UINT kWake = WM_APP+0x473;
@@ -307,12 +351,10 @@ struct Packet {
 };
 static_assert(sizeof(void*) == 8, "This source targets Windows x64.");
 
-struct Settings {
-    bool open=true, close=true, restore=true, hides=false, battery=false, respectEffects=true;
+struct Settings : AppMotion::Tuning {
+    Settings() : Tuning(AppMotion::Balanced60) {}
+    bool open=true, close=true, restore=true, hides=false, respectEffects=true;
     bool diagnostics=false;
-    int openMs=150, closeMs=120, scale=96, concurrent=2, megapixels=4, handoffMs=40, idleSeconds=15;
-    int restoreMs=110,restoreOpacity=35,restoreDispatchMs=60;
-    AppMotion::Curve curve=AppMotion::Curve::Smooth;
     std::wstring excluded;
 } g;
 std::atomic<bool> g_unloading{false};
@@ -323,7 +365,7 @@ thread_local HWND g_taskbarRoutedWindow=nullptr;
 thread_local DWORD g_taskbarInputTime=0;
 thread_local bool g_taskbarInputSeen=false;
 thread_local bool g_clientDispatcherSeen=false;
-UINT g_restoreMessage=0;
+UINT g_restoreMessage=0,g_finishRevealMessage=0;
 std::atomic<HANDLE> g_timerQueue{nullptr};
 HANDLE g_stop=nullptr, g_brokerThread=nullptr;
 DWORD g_brokerThreadId=0;
@@ -363,6 +405,13 @@ HRESULT WINAPI AttributeHook(HWND hwnd,DWORD attribute,LPCVOID value,DWORD size)
         if (pid==GetCurrentProcessId()) {
             BOOL preference=FALSE; memcpy(&preference,value,sizeof(preference));
             SetPropW(hwnd,kTransitionPreference,reinterpret_cast<HANDLE>(preference ? 2 : 1));
+            // Defer the app's requested preference until our reveal finishes.
+            // Re-enabling native transitions mid-reveal can produce a second
+            // fade/scale when the real source is uncloaked.
+            if (!preference && GetPropW(hwnd,kOpenToken)) {
+                const BOOL disabled=TRUE;
+                g_setAttribute(hwnd,DWMWA_TRANSITIONS_FORCEDISABLED,&disabled,sizeof(disabled));
+            }
         }
     }
     SetLastError(error); return result;
@@ -437,7 +486,7 @@ std::wstring GetString(PCWSTR name) {
 }
 std::wstring ObjectName(DWORD pid, std::uint64_t token, PCWSTR suffix) {
     wchar_t name[160];
-    swprintf(name, ARRAYSIZE(name), L"Local\\NativeAppMotion.030.%lu.%016llX.%s",
+    swprintf(name, ARRAYSIZE(name), L"Local\\NativeAppMotion.031.%lu.%016llX.%s",
              pid, static_cast<unsigned long long>(token), suffix);
     return name;
 }
@@ -451,24 +500,26 @@ bool OwnsOpen(const Packet& p) {
     return SameSource(p) && reinterpret_cast<std::uintptr_t>(
         GetPropW(reinterpret_cast<HWND>(p.source), kOpenToken))==p.token;
 }
-void RestoreOpen(Packet& shared,const Packet* immutable=nullptr) {
+bool RestoreOpen(Packet& shared,const Packet* immutable=nullptr,bool synchronize=false) {
     // The source process watchdog and Explorer can finish concurrently. Only
     // one may restore this generation; a failed cross-integrity restore leaves
     // ownership available for the source-process watchdog to retry.
     struct Platform {
-        Packet& shared; const Packet& config;
+        Packet& shared; const Packet& config; bool synchronize;
         bool Claim() { return InterlockedCompareExchange(&shared.restoreClaim,1,0)==0; }
         bool OwnsGeneration() { return OwnsOpen(config); }
         HWND Source() { return reinterpret_cast<HWND>(config.source); }
+        void PresentFinalFrame() { if (synchronize) DwmFlush(); }
         bool Uncloak() { BOOL no=FALSE; return SUCCEEDED(SetAttribute(Source(),DWMWA_CLOAK,&no,sizeof(no))); }
+        void PresentSource() { if (synchronize) DwmFlush(); }
         bool RestoreTransitions() {
             const BOOL original=TransitionPreference(Source(),config.originalTransitions);
             return SUCCEEDED(SetAttribute(Source(),DWMWA_TRANSITIONS_FORCEDISABLED,&original,sizeof(original)));
         }
         void ReleaseClaim() { InterlockedExchange(&shared.restoreClaim,0); }
         void RemoveToken() { RemovePropW(Source(),kOpenToken); }
-    } platform{shared,immutable ? *immutable : shared};
-    AppMotion::RestoreOpening(platform);
+    } platform{shared,immutable ? *immutable : shared,synchronize};
+    return AppMotion::RestoreOpening(platform);
 }
 
 struct Request {
@@ -476,6 +527,7 @@ struct Request {
     Packet* packet=nullptr;
     HANDLE timer=nullptr, queue=nullptr;
     HWND broker=nullptr;
+    std::atomic<bool> finishRequested{false};
     ~Request() { if (packet) UnmapViewOfFile(packet); }
 };
 std::mutex g_requestsMutex;
@@ -575,7 +627,7 @@ bool QueueTaskbarRestore(HWND hwnd,int showCommand=SW_RESTORE) noexcept {
         const bool hung=IsHungAppWindow(hwnd)!=FALSE;
         if (!AppMotion::CanRouteRestore(true,true,supported,broker!=nullptr,pending,hung) || !EffectsAllowed()) {
             Log(!supported ? L"TASKBAR_NATIVE client not ready; restart target and check CLIENT_READY" :
-                !broker ? L"TASKBAR_NATIVE protocol 0.3 broker unavailable; re-enable after desktop startup" :
+                !broker ? L"TASKBAR_NATIVE protocol 0.3.1 broker unavailable; re-enable after desktop startup" :
                 pending ? L"TASKBAR_NATIVE restore already pending; latest click stays native" :
                 hung ? L"TASKBAR_NATIVE target UI reported hung" : L"TASKBAR_NATIVE animation or battery preference disabled effect",hwnd);
             return false;
@@ -596,7 +648,7 @@ bool QueueTaskbarRestore(HWND hwnd,int showCommand=SW_RESTORE) noexcept {
         ticket->packet=static_cast<RestorePacket*>(MapViewOfFile(ticket->mapping.value,FILE_MAP_ALL_ACCESS,0,0,sizeof(RestorePacket)));
         if (!ticket->packet) return false;
         RestorePacket& p=*ticket->packet;
-        p={}; p.magic=kMagic; p.version=3; p.pid=pid; p.source=reinterpret_cast<std::uintptr_t>(hwnd);
+        p={}; p.magic=kMagic; p.version=4; p.pid=pid; p.source=reinterpret_cast<std::uintptr_t>(hwnd);
         p.showCommand=showCommand;
         p.token=token; p.deadline=GetTickCount64()+g.restoreDispatchMs;
         p.queuedMs=PreciseMs();
@@ -680,7 +732,7 @@ std::shared_ptr<Request> MakeRequest(HWND hwnd, DWORD operation, std::uint64_t b
     if (!r->packet) return {};
     Packet& p=*r->packet;
     p={};
-    p.magic=kMagic; p.version=3; p.headerBytes=sizeof(Packet); p.operation=operation;
+    p.magic=kMagic; p.version=4; p.headerBytes=sizeof(Packet); p.operation=operation;
     p.pid=GetCurrentProcessId(); p.source=reinterpret_cast<std::uintptr_t>(hwnd); p.token=token;
     p.durationMs=operation==Opening ? g.openMs : operation==Restoring ? g.restoreMs : g.closeMs;
     p.scalePercent=g.scale;
@@ -845,15 +897,22 @@ void CALLBACK OpenWatchdog(void* context, BOOLEAN) {
         request=*it;
         g_openRequests.erase(it);
     }
-    if (OwnsOpen(*request->packet)) Log(L"REVEAL_WATCHDOG restoring source visibility after renderer did not finish",reinterpret_cast<HWND>(request->packet->source));
-    InterlockedExchange(&request->packet->state,Cancelled);
-    RestoreOpen(*request->packet);
+    const bool finishing=request->finishRequested.load();
+    if (!finishing && OwnsOpen(*request->packet)) Log(L"REVEAL_WATCHDOG restoring source visibility after renderer did not finish",reinterpret_cast<HWND>(request->packet->source));
+    if (!finishing) InterlockedExchange(&request->packet->state,Cancelled);
+    // A renderer that cannot change a foreign window asks this existing
+    // one-shot worker to finish locally. DwmFlush never blocks the app UI.
+    RestoreOpen(*request->packet,nullptr,finishing);
+    if (finishing) InterlockedExchange(&request->packet->state,Complete);
     // Nonblocking deletion from the timer's own callback; context stays alive
     // through the shared_ptr above until the callback returns.
     DeleteTimerQueueTimer(request->queue,request->timer,nullptr);
 }
 
 std::shared_ptr<Request> PrepareOpen(HWND hwnd,bool restoring=false) {
+    // A framework can hide/show its startup HWND several times. Only the first
+    // launch gets this effect; minimized restores have their own path.
+    if (!restoring && GetPropW(hwnd,kShownOnce)) return {};
     if (!(restoring ? g.restore : g.open) || !g_timerQueue.load() || !EffectsAllowed() ||
         !Eligible(hwnd,true,restoring)) {
         Log(restoring ? L"RESTORE_NATIVE source reveal eligibility/preferences rejected request" :
@@ -862,7 +921,6 @@ std::shared_ptr<Request> PrepareOpen(HWND hwnd,bool restoring=false) {
     }
     auto r=MakeRequest(hwnd,restoring ? Restoring : Opening,0);
     if (!r) { Log(L"REVEAL_NATIVE renderer or request mapping unavailable",hwnd); return {}; }
-    if (!r) return {};
     struct Recovery {
         Request* request; bool committed=false;
         ~Recovery() {
@@ -919,6 +977,8 @@ void SubmitOpen(const std::shared_ptr<Request>& r) {
     if (InterlockedCompareExchange(&p.state,Pending,Pending)!=Pending) { RestoreOpen(p); return; }
     if (!PostMessageW(r->broker,kRequest,p.pid,static_cast<LPARAM>(p.token))) {
         InterlockedExchange(&p.state,Cancelled); RestoreOpen(p);
+    } else if (p.operation==Opening) {
+        SetPropW(hwnd,kShownOnce,reinterpret_cast<HANDLE>(1));
     }
 }
 
@@ -939,6 +999,10 @@ bool ShowIntent(int command) {
     return command==SW_SHOW || command==SW_SHOWNORMAL || command==SW_SHOWMAXIMIZED ||
            command==SW_SHOWDEFAULT || command==SW_RESTORE;
 }
+bool ShowKeepsReveal(HWND hwnd,int command) {
+    return command==SW_SHOW || command==SW_SHOWNA || command==SW_SHOWNOACTIVATE ||
+           ((command==SW_SHOWNORMAL || command==SW_SHOWDEFAULT) && !IsZoomed(hwnd) && !IsIconic(hwnd));
+}
 BOOL WINAPI ShowHook(HWND hwnd,int command) {
     const DWORD entryError=GetLastError(); ScopeDepth depth;
     if (g_hookDepth!=1 || g_unloading) { SetLastError(entryError); return g_show(hwnd,command); }
@@ -947,7 +1011,9 @@ BOOL WINAPI ShowHook(HWND hwnd,int command) {
         if (QueueTaskbarRestore(hwnd,command)) { SetLastError(entryError); return wasVisible; }
     }
     const bool wasOpening=GetPropW(hwnd,kOpenToken)!=nullptr;
-    if (wasOpening) CancelOwnOpen(hwnd);
+    // Redundant activation/show calls are common during startup. They must
+    // not reveal the full-size source underneath a half-faded thumbnail.
+    if (wasOpening && !ShowKeepsReveal(hwnd,command)) CancelOwnOpen(hwnd);
     auto open=ShowIntent(command) && !wasOpening ? SafePrepare(hwnd,true,IsIconic(hwnd)!=FALSE) : std::shared_ptr<Request>{};
     auto close=command==SW_HIDE && g.hides && !wasOpening ? SafePrepare(hwnd,false) : std::shared_ptr<Request>{};
     SetLastError(entryError);
@@ -1015,7 +1081,7 @@ bool HandleRestoreMessage(const MSG& message) {
     } finish{p,false,{}};
     if (InterlockedCompareExchange(&p->state,Pending,Pending)!=Pending) return true;
     const RestorePacket copy=*p;
-    if (copy.magic!=kMagic || copy.version!=3 || copy.pid!=GetCurrentProcessId() ||
+    if (copy.magic!=kMagic || copy.version!=4 || copy.pid!=GetCurrentProcessId() ||
         copy.token!=token || reinterpret_cast<HWND>(copy.source)!=message.hwnd ||
         !RestoreShowCommand(copy.showCommand) || !TicketSource(copy)) return true;
     finish.config=copy;
@@ -1040,6 +1106,20 @@ bool HandleRestoreMessage(const MSG& message) {
 bool DispatchRestore(const MSG* message) noexcept {
     if (!message) return false;
     try {
+        if (g_finishRevealMessage && message->message==g_finishRevealMessage) {
+            if (reinterpret_cast<HWND>(message->lParam)!=Broker()) return true;
+            std::lock_guard lock(g_requestsMutex);
+            for (const auto& r:g_openRequests) {
+                if (r->packet->source==reinterpret_cast<std::uintptr_t>(message->hwnd) &&
+                    r->packet->token==static_cast<std::uint64_t>(message->wParam) &&
+                    OwnsOpen(*r->packet)) {
+                    r->finishRequested.store(true);
+                    ChangeTimerQueueTimer(r->queue,r->timer,0,0);
+                    break;
+                }
+            }
+            return true;
+        }
         if (g.restore && !g_unloading && !g_clientDispatcherSeen) {
             g_clientDispatcherSeen=true;
             // Show/activate messages are often sent directly to WndProc. Do
@@ -1070,10 +1150,17 @@ LRESULT WINAPI DispatchAHook(const MSG* message) {
 BOOL WINAPI PositionHook(HWND hwnd,HWND after,int x,int y,int cx,int cy,UINT flags) {
     const DWORD entryError=GetLastError(); ScopeDepth depth;
     if (g_hookDepth!=1 || g_unloading) { SetLastError(entryError); return g_position(hwnd,after,x,y,cx,cy,flags); }
-    const bool visibility=(flags&(SWP_SHOWWINDOW|SWP_HIDEWINDOW))!=0;
-    const bool geometry=(flags&(SWP_NOMOVE|SWP_NOSIZE))!=(SWP_NOMOVE|SWP_NOSIZE);
-    const bool wasOpening=(visibility || geometry) && GetPropW(hwnd,kOpenToken)!=nullptr;
-    if (wasOpening) CancelOwnOpen(hwnd);
+    const bool wasOpening=GetPropW(hwnd,kOpenToken)!=nullptr;
+    bool geometry=false;
+    if (wasOpening && (flags&(SWP_NOMOVE|SWP_NOSIZE))!=(SWP_NOMOVE|SWP_NOSIZE)) {
+        // Use the caller's DPI context, the same one used by SetWindowPos.
+        RECT before{};
+        geometry=!GetWindowRect(hwnd,&before) || AppMotion::ChangesGeometry(
+            {before.left,before.top,before.right,before.bottom},
+            x,y,cx,cy,
+            !(flags&SWP_NOMOVE),!(flags&SWP_NOSIZE));
+    }
+    if (wasOpening && (geometry || (flags&(SWP_HIDEWINDOW|SWP_FRAMECHANGED)))) CancelOwnOpen(hwnd);
     auto open=(flags&SWP_SHOWWINDOW) && !(flags&(SWP_HIDEWINDOW|SWP_NOACTIVATE)) && !wasOpening ?
                SafePrepare(hwnd,true) : std::shared_ptr<Request>{};
     auto close=(flags&SWP_HIDEWINDOW) && g.hides && !wasOpening ? SafePrepare(hwnd,false) : std::shared_ptr<Request>{};
@@ -1146,7 +1233,7 @@ struct Animation {
     ComPtr<IDCompositionSurface> surface;
     ULONGLONG started=0, deadline=0;
     double startedPrecise=0;
-    bool running=false;
+    bool running=false,finishing=false;
     ~Animation() {
         if (packet && LiveOperation(config.operation)) RestoreOpen(*packet,&config);
         if (thumbnail) DwmUnregisterThumbnail(thumbnail);
@@ -1245,7 +1332,7 @@ std::unique_ptr<Animation> ReadRequest(DWORD pid,std::uint64_t token) {
     UnmapViewOfFile(header);
     const std::int64_t width=static_cast<std::int64_t>(copy.rect.right)-copy.rect.left;
     const std::int64_t height=static_cast<std::int64_t>(copy.rect.bottom)-copy.rect.top;
-    if (copy.magic!=kMagic || copy.version!=3 || copy.headerBytes!=sizeof(Packet) ||
+    if (copy.magic!=kMagic || copy.version!=4 || copy.headerBytes!=sizeof(Packet) ||
         copy.pid!=pid || copy.token!=token || (!LiveOperation(copy.operation) && copy.operation!=Closing) ||
         copy.durationMs<60 || copy.durationMs>400 || copy.scalePercent<90 || copy.scalePercent>100 ||
         copy.curve>2 || copy.startOpacityPercent>100 || width<32 || height<32 || width>16384 || height>16384 ||
@@ -1314,7 +1401,7 @@ void ReceiveRequest(DWORD pid,std::uint64_t token) {
     if (!AppMotion::PublishReady([&](int desired,int expected) {
             return InterlockedCompareExchange(&a->packet->state,desired,expected);
         })) return;
-    a->started=GetTickCount64(); a->deadline=a->started+(LiveOperation(p.operation) ? p.durationMs+50 : 250);
+    a->started=GetTickCount64(); a->deadline=a->started+(LiveOperation(p.operation) ? p.durationMs+150 : 250);
     a->startedPrecise=PreciseMs();
     if (LiveOperation(p.operation)) {
         a->running=true;
@@ -1351,6 +1438,15 @@ bool UpdateAnimations() {
         LONG state=State(a->packet);
         if (state==Cancelled || state==Complete) continue;
         if (LiveOperation(p.operation)) {
+            if (a->finishing) {
+                if (!OwnsOpen(p)) {
+                    DwmFlush();
+                    InterlockedExchange(&a->packet->state,Complete);
+                } else if (now>=a->deadline) {
+                    InterlockedExchange(&a->packet->state,Cancelled);
+                } else live=true;
+                continue;
+            }
             if (!OwnsOpen(p) || !IsWindowVisible(reinterpret_cast<HWND>(p.source)) ||
                 IsIconic(reinterpret_cast<HWND>(p.source)) ||
                 (p.operation==Restoring && GetAncestor(GetForegroundWindow(),GA_ROOT)!=reinterpret_cast<HWND>(p.source))) {
@@ -1369,7 +1465,21 @@ bool UpdateAnimations() {
             thumb.rcDestination={(width-scaledW)/2,(height-scaledH)/2,
                                   (width+scaledW)/2,(height+scaledH)/2};
             if (FAILED(DwmUpdateThumbnailProperties(a->thumbnail,&thumb))) { InterlockedExchange(&a->packet->state,Cancelled); continue; }
-            if (t>=1) { RestoreOpen(*a->packet,&p); InterlockedExchange(&a->packet->state,Complete); }
+            if (t>=1) {
+                // Flush the final thumbnail, uncloak under its opaque cover,
+                // then flush the source BEFORE destroying the overlay or
+                // re-enabling the native transition preference. Broker only:
+                // no compositor-completion wait is added to the app UI thread.
+                RestoreOpen(*a->packet,&p,true);
+                if (!OwnsOpen(p)) InterlockedExchange(&a->packet->state,Complete);
+                else {
+                    a->finishing=true;
+                    PostMessageW(reinterpret_cast<HWND>(p.source),g_finishRevealMessage,
+                        static_cast<WPARAM>(p.token),reinterpret_cast<LPARAM>(Broker()));
+                    live=true;
+                    Log(L"REVEAL_HANDOFF requesting source-process recovery worker",reinterpret_cast<HWND>(p.source));
+                }
+            }
             else live=true;
         } else if (!a->running && (state==Started || !SameSource(p) ||
                                    !IsWindowVisible(reinterpret_cast<HWND>(p.source)))) {
@@ -1403,7 +1513,7 @@ DWORD WINAPI BrokerThread(void*) {
     HWND control=brokerClass && overlayClass ? CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
         kBrokerClass,L"",WS_POPUP,0,0,0,0,nullptr,nullptr,g_module,nullptr) : nullptr;
     if (control) {
-        Wh_Log(L"BROKER_READY protocol=0.3 hwnd=%p closing_device=%d; restart target apps if CLIENT_READY is absent",
+        Wh_Log(L"BROKER_READY protocol=0.3.1 hwnd=%p closing_device=%d; restart target apps if CLIENT_READY is absent",
             control,state.graphics.composition.Get()!=nullptr);
         ULONGLONG idleDeadline=GetTickCount64()+g.idleSeconds*1000;
         while (WaitForSingleObject(g_stop,0)!=WAIT_OBJECT_0) {
@@ -1541,8 +1651,10 @@ BOOL Wh_ModInit() {
     g.restoreMs=AppMotion::Clamp(Wh_GetIntSetting(L"restoreDurationMs"),60,250);
     g.restoreOpacity=AppMotion::Clamp(Wh_GetIntSetting(L"restoreStartOpacityPercent"),0,100);
     g.restoreDispatchMs=AppMotion::Clamp(Wh_GetIntSetting(L"restoreDispatchTimeoutMs"),20,120);
-    g_restoreMessage=RegisterWindowMessageW(L"NativeAppMotion.Restore.030.8F23A10C");
+    g_restoreMessage=RegisterWindowMessageW(L"NativeAppMotion.Restore.031.8F23A10C");
     if (!g_restoreMessage) { g.restore=false; Wh_Log(L"TASKBAR_HOOK_UNAVAILABLE restore message registration failed."); }
+    g_finishRevealMessage=RegisterWindowMessageW(L"NativeAppMotion.FinishReveal.031.8F23A10C");
+    if (!g_finishRevealMessage) { g.open=false; g.restore=false; Wh_Log(L"REVEAL_UNAVAILABLE recovery message registration failed."); }
     g.hides=Wh_GetIntSetting(L"animateTrayHides")!=0; g.battery=Wh_GetIntSetting(L"disableOnBattery")!=0;
     g.respectEffects=Wh_GetIntSetting(L"respectAnimationEffects")!=0;
     g.diagnostics=Wh_GetIntSetting(L"diagnostics")!=0;
@@ -1555,6 +1667,10 @@ BOOL Wh_ModInit() {
     g.idleSeconds=AppMotion::Clamp(Wh_GetIntSetting(L"gpuIdleSeconds"),1,120);
     const auto curve=GetString(L"easing");
     g.curve=curve==L"out" ? AppMotion::Curve::Out : curve==L"linear" ? AppMotion::Curve::Linear : AppMotion::Curve::Smooth;
+    if (GetString(L"motionPreset")!=L"custom") {
+        static_cast<AppMotion::Tuning&>(g)=AppMotion::Balanced60;
+        Wh_Log(L"PRESET balanced60 open=133 close=100 restore=100 opacity=50 scale=97 snapshot_mp=2 handoff=34; individual tuning fields are overridden");
+    }
     g.excluded=GetString(L"excludedProcesses");
     DWORD session=0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(),&session) || session==0 || !GetModuleHandleW(L"user32.dll")) return FALSE;
@@ -1586,14 +1702,14 @@ BOOL Wh_ModInit() {
             !Hook(&SetWindowDisplayAffinity,AffinityHook,&g_setAffinity) ||
             !Hook(&CreateWindowExW,CreateWHook,&g_createW) || !Hook(&CreateWindowExA,CreateAHook,&g_createA)) return FALSE;
     }
-    if (g.restore) {
+    if (g.open || g.restore) {
         if (!Hook(&DispatchMessageW,DispatchWHook,&g_dispatchW) || !Hook(&DispatchMessageA,DispatchAHook,&g_dispatchA)) return FALSE;
-        if (explorer && InstallTaskbarHook()) {
+        if (g.restore && explorer && InstallTaskbarHook()) {
             if (!Hook(&ShowWindowAsync,ShowAsyncHook,&g_showAsync) ||
                 !Hook(&SwitchToThisWindow,SwitchWindowHook,&g_switchWindow)) return FALSE;
         }
     }
-    Wh_Log(L"CLIENT_INIT protocol=0.3 process=%s pid=%lu open=%d close=%d restore=%d; enable diagnostics for transition/fallback events",
+    Wh_Log(L"CLIENT_INIT protocol=0.3.1 process=%s pid=%lu open=%d close=%d restore=%d; enable diagnostics for transition/fallback events",
         name,GetCurrentProcessId(),g.open,g.close,g.restore);
     return TRUE;
 }
@@ -1634,6 +1750,7 @@ void Wh_ModBeforeUninit() {
             RemovePropW(hwnd,kClientReady);
             RemovePropW(hwnd,kRestorePending);
             RemovePropW(hwnd,kAffinityPreference);
+            RemovePropW(hwnd,kShownOnce);
         }
         return TRUE;
     },0);

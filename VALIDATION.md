@@ -1,4 +1,4 @@
-# Native-style App Motion 0.3.0 — validation
+# Native-style App Motion 0.3.1 — validation
 
 ## Executed in the Linux development environment
 
@@ -6,17 +6,22 @@
   Windhawk API headers, with C++20 and warnings treated as errors.
 - Windows DLL link and callback export/import inspection.
 - Official Windhawk metadata and settings validation.
-- `tests/motion_tests.cpp`: 14,387 portable checks covering curve endpoints,
+- `tests/motion_tests.cpp`: 14,405 portable checks covering curve endpoints,
   monotonicity, finite/range behavior, equivalence of live and compositor curves,
   portrait/ultrawide/4K image budgeting, malformed image dimensions/byte counts,
   cancellation/ready races, one-time opening recovery with retry after failure,
   minimized-but-visible restoration, safe affinity-query fallback, supported
-  taskbar routing decisions and exclusive source/deadline restore claims.
+  taskbar routing decisions and exclusive source/deadline restore claims. Added
+  a compositor model that separates queued changes from presented windows:
+  the final thumbnail must present before uncloak, source presentation must
+  precede preference restoration and overlay destruction, and completion cannot
+  run twice. Geometry checks cover no-op layouts, actual moves/resizes, negative
+  monitor coordinates and overflow. The preset preserves 1360×768 capture size.
 - The same portable app-motion checks passed with AddressSanitizer and
   UndefinedBehaviorSanitizer enabled; these sanitizers do not cover Windows code.
 
 The numeric count includes sampled curve/geometry cases. It does not represent
-14,387 independent app integration tests. Portable atomics do not prove actual
+14,405 independent app integration tests. Portable atomics do not prove actual
 Windows compositor, IPC, driver, focus or timing behavior.
 
 The retained taskbar experiment also passes its 348 policy and 52 mocked-adapter
@@ -39,6 +44,11 @@ older taskbar experiment and other animation replacements, then test:
 | Scenario | Required observation |
 | --- | --- |
 | Notepad/browser first launch | Live content fades/scales in; correct focus; no final uncloak flash |
+| Repeated ShowWindow / identical SetWindowPos during reveal | No interruption or second appearance |
+| Startup hide/show cycle on one HWND | No repeated custom launch effect; original show still runs |
+| App changes transition preference during reveal | Native transition stays suppressed until source presentation, then app preference is restored |
+| Explorer cannot uncloak source directly | Existing source recovery worker completes handoff; app UI never waits on DwmFlush |
+| Upgrade with old saved settings | Balanced 60 Hz applies its effective values; Custom uses saved tuning fields |
 | Minimized app restored by its taskbar button | Queue/receive/animation logs appear; correct focus; no full-animation wait on the taskbar UI thread |
 | App already visible | Original focus-switch path; no artificial fade or extra restore |
 | Taskbar restore hook unavailable | Explicit log; original taskbar activation still works |

@@ -51,7 +51,9 @@ int main() {
         int visibilityCalls=0,preferenceCalls=0;
         bool Claim() { if (claimed) return false; claimed=true; return true; }
         bool OwnsGeneration() { return owns; }
+        void PresentFinalFrame() {}
         bool Uncloak() { ++visibilityCalls; return uncloakSucceeds; }
+        void PresentSource() {}
         bool RestoreTransitions() { ++preferenceCalls; return preferenceSucceeds; }
         void ReleaseClaim() { claimed=false; released=true; }
         void RemoveToken() { removed=true; }
@@ -76,6 +78,58 @@ int main() {
     RecoveryPlatform reused; reused.owns=false;
     RestoreOpening(reused);
     Require(reused.visibilityCalls==0 && reused.preferenceCalls==0,"old request cannot alter a new window generation");
+    // Model queued compositor changes separately from what is on screen.
+    // Removing the overlay immediately after Uncloak leaves a blank frame;
+    // resetting transitions before presentation can queue a second animation.
+    struct Display {
+        bool claimed=false,token=true;
+        bool finalThumbnailPresented=false,sourceQueued=false,sourcePresented=false;
+        bool nativeTransitionsDisabled=true,overlayVisible=true;
+        int boundaries=0;
+        bool Claim() { if (claimed) return false; claimed=true; return true; }
+        bool OwnsGeneration() { return token; }
+        void PresentFinalFrame() {
+            Require(overlayVisible && !sourcePresented,"final animated frame covers the hidden source");
+            finalThumbnailPresented=true; ++boundaries;
+        }
+        bool Uncloak() {
+            Require(finalThumbnailPresented,"full-size opaque thumbnail is presented before uncloak");
+            Require(nativeTransitionsDisabled,"native animation stays suppressed at uncloak");
+            sourceQueued=true; return true;
+        }
+        void PresentSource() {
+            Require(overlayVisible && sourceQueued && nativeTransitionsDisabled,
+                    "overlay remains in place and native motion stays disabled at source presentation");
+            sourcePresented=true; ++boundaries;
+        }
+        bool RestoreTransitions() {
+            Require(sourcePresented,"native preferences restored only after source presentation");
+            nativeTransitionsDisabled=false; return true;
+        }
+        void ReleaseClaim() { claimed=false; }
+        void RemoveToken() { token=false; }
+        void DestroyOverlay() {
+            Require(sourcePresented,"no empty frame between animated copy and real window");
+            overlayVisible=false;
+        }
+    } display;
+    Require(RestoreOpening(display),"normal reveal finishes successfully");
+    display.DestroyOverlay();
+    Require(display.boundaries==2 && !display.token,"two presentation boundaries precede overlay removal");
+    Require(!RestoreOpening(display) && display.boundaries==2,"completed reveal is not presented twice");
+
+    const Rect initial{100,50,900,650};
+    Require(!ChangesGeometry(initial,100,50,800,600,true,true),"redundant layout call does not interrupt reveal");
+    Require(!ChangesGeometry(initial,0,0,0,0,false,false),"ignored coordinates cannot interrupt reveal");
+    Require(!ChangesGeometry(initial,100,50,0,0,true,false),"move-only call ignores unused size");
+    Require(!ChangesGeometry(initial,0,0,800,600,false,true),"size-only call ignores unused position");
+    Require(ChangesGeometry(initial,101,50,800,600,true,true),"actual move cancels obsolete geometry");
+    Require(ChangesGeometry(initial,100,50,801,600,true,true),"actual resize cancels obsolete geometry");
+    Require(!ChangesGeometry({-1360,0,0,768},-1360,0,1360,768,true,true),"negative-monitor coordinates compare correctly");
+    Require(ChangesGeometry({std::numeric_limits<int>::min(),0,std::numeric_limits<int>::max(),100},
+                           0,0,100,100,false,true),"geometry comparison cannot overflow");
+    const auto screen=FitImage(1360,768,static_cast<std::uint64_t>(Balanced60.megapixels)*1'000'000);
+    Require(screen.width==1360 && screen.height==768,"60 Hz preset preserves the supplied monitor resolution");
     for (int initial:{Pending,Ready,Started,Complete,Cancelled}) {
         std::atomic<int> state{initial};
         auto cas=[&](int desired,int expected) {

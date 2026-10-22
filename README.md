@@ -2,15 +2,24 @@
 
 **Copy [`native-app-motion.wh.cpp`](native-app-motion.wh.cpp) into Windhawk.**
 
-Version 0.3.0 implements **app opening, closing and supported taskbar restore
+Version 0.3.1 implements **app opening, closing and supported taskbar restore
 animations**, recreating a Windows-style scale-and-fade appearance with GPU
 composition. It replaces the earlier taskbar experiment.
 
-This update addresses two concrete gaps: 0.2 did not animate minimized-window
-restores, and its display-affinity eligibility check could silently reject normal
-windows. Failed affinity queries no longer disable live DWM reveals. Screen
-snapshots still require an unrestricted query or a tracked unrestricted setting
-on a window created after injection; protected/unknown snapshots are skipped.
+This update addresses the reported flash/reappearance: normal reveal completion
+now presents the final thumbnail, reveals the real source beneath it and waits
+for source presentation before releasing the cover and native transition
+suppression. Redundant show/layout calls preserve an active reveal, startup
+hide/show cycles cannot repeat the custom launch effect on the same window, and
+an app cannot re-enable its native animation halfway through a custom reveal.
+A local recovery worker handles completion when Explorer cannot change the source.
+
+**Use Motion preset → Balanced 60 Hz (recommended).** This is the new default,
+selected for the supplied Ryzen 5600X, RTX 3060 12 GB, 16 GB RAM and 1360×768/60 Hz
+display. It applies all timing/resource values together even when Windhawk keeps
+individual values saved from an older version. It is a conservative starting
+configuration, not a measured hardware optimum. Select Custom settings only to
+use the individual tuning fields.
 
 **Experimental, not yet tested on a real Windows desktop.** Cross-compilation and
 portable checks pass. Actual appearance, focus, timing, compatibility and resource
@@ -27,8 +36,11 @@ promise zero stutter, fix every black flash, or make app content render sooner.
 4. Enable it while Explorer is running. Restart the apps you want to test so the
    new mod loads in them. Both Explorer's renderer and the source app hooks are
    required.
-5. Start with defaults. Leave Windows' **Animation effects** enabled under
-   Settings > Accessibility > Visual effects.
+5. Select **Balanced 60 Hz (recommended)** in **Motion preset**. Keep opening,
+   closing and restoration enabled; keep explicit hides off. Leave Windows'
+   **Animation effects** enabled under Settings > Accessibility > Visual effects.
+6. After upgrading from 0.3.0, restart Windows once so Explorer and all apps load
+   the same version. Replace the existing mod rather than enabling another copy.
 
 The optional taskbar restore hook may download one Microsoft taskbar symbol on
 first use. Missing symbols leave taskbar routing native; other app effects can
@@ -43,6 +55,11 @@ written.
 fades/scales in while the real window is temporarily cloaked. Updates follow DWM
 composition boundaries, using a high-resolution progress clock. A one-shot
 watchdog in the app restores visibility if the renderer fails or disappears.
+Completion uses two compositor boundaries: first the full-size opaque thumbnail,
+then the real source, before the overlay is removed. These waits run on the
+broker or a source recovery worker, not on the app's UI thread. Redundant
+show/no-op layout calls do not interrupt the effect. A real move, resize, hide
+or minimize still cancels it.
 Failures can reveal the real window immediately without an opening animation.
 
 **Closing:** the mod captures an unobscured window once, uploads it once and
@@ -54,7 +71,7 @@ handoff uses the native close.
 
 **Taskbar restore:** for supported minimized windows, Explorer's existing task
 switch routine forwards the restore to the app's confirmed UI dispatcher. The
-default is a 110 ms ease-out with 35% first-frame visibility, providing earlier
+default is a 100 ms ease-out with 50% first-frame visibility, providing earlier
 feedback than a completely transparent starting frame. No snapshot or
 animation-completion wait is added to the taskbar thread. An atomic deadline
 protocol prevents a delayed duplicate restore from unmaximizing a window.
@@ -73,26 +90,28 @@ the newer operation.
 | --- | --- | --- |
 | Animate app opening / closing | Both on | Toggle each transition separately |
 | Animate restoration from the taskbar | On | Enable supported minimized-window restores |
-| Restore duration / first-frame visibility | 110 ms / 35% | Fast-start ease-out; tune the visual feedback |
-| Restore dispatch deadline | 60 ms | Unclaimed work can fall back; claimed requests are not replayed |
-| Opening / closing duration | 150 / 120 ms | Tune perceived pace |
-| Smallest scale | 96% | Subtle Windows-style motion; 100% gives fade only |
-| Opening/closing motion curve | Smooth | Restore uses fast-start ease-out independently |
+| Motion preset | Balanced 60 Hz | Applies timing/resource values together; select Custom to edit them |
+| Restore duration / first-frame visibility | 100 ms / 50% | Fast-start ease-out; tune the visual feedback |
+| Restore dispatch deadline | 50 ms | Unclaimed work can fall back; claimed requests are not replayed |
+| Opening / closing duration | 133 / 100 ms | Curve duration; presentation/setup time is additional |
+| Smallest scale | 97% | Subtle Windows-style motion; 100% gives fade only |
+| Opening/closing motion curve | Fast start, gentle finish | Restore uses fast-start ease-out independently |
 | Maximum simultaneous animations | 2 | Limit active renderer work; extra requests fall back |
-| Closing snapshot budget | 4 megapixels | Limit each upload; larger windows are downscaled |
-| Closing handoff wait | 40 ms | Limit how long the app waits for renderer readiness |
+| Closing snapshot budget | 2 megapixels | Full resolution at 1360×768; larger windows may be downscaled |
+| Closing handoff wait | 34 ms | Limit how long the app waits for renderer readiness |
 | Release closing GPU resources after idle | 15 seconds | Drop the device/libraries after inactivity; later cold starts can fall back |
 | Animate explicit hides | Off | Optional tray-hide effects |
-| Use native animations on battery | Off | Optional battery-first behavior |
+| Use native animations on battery | On | Battery-first behavior; no effect on an AC-powered desktop |
 | Respect Windows animation preferences | On | Honor disabled animation effects |
 | Excluded apps | Empty | Exact executable names separated by semicolons |
 | Diagnostic logging | Off | Identify custom animations and native fallbacks |
 
-Recommended first test: retain defaults. For less work on battery, enable **Use
-native animations on battery**. For tighter texture/CPU-upload limits, reduce the
-snapshot budget or concurrency. The pixel budget limits each image, not all
-driver-managed memory. Resource limits can trade image sharpness or coverage for
-less work.
+Balanced 60 Hz overrides duration, opacity, dispatch deadline, scale, easing,
+concurrency, snapshot budget, handoff, GPU idle and battery fields. Saved custom
+values can still appear in those fields but are inactive until Custom is selected.
+Animation toggles, Windows animation preference, exclusions and logging remain
+independent. At 1360×768, a full-screen BGRA snapshot is about 4 MiB. The pixel
+budget limits each image, not all driver-managed memory or overall mod memory.
 
 ## Resource design and limits
 
