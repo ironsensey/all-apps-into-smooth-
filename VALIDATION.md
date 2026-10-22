@@ -1,4 +1,4 @@
-# Native-style App Motion 0.2.0 — validation
+# Native-style App Motion 0.3.0 — validation
 
 ## Executed in the Linux development environment
 
@@ -6,15 +6,17 @@
   Windhawk API headers, with C++20 and warnings treated as errors.
 - Windows DLL link and callback export/import inspection.
 - Official Windhawk metadata and settings validation.
-- `tests/motion_tests.cpp`: 13,768 portable checks covering curve endpoints,
+- `tests/motion_tests.cpp`: 14,387 portable checks covering curve endpoints,
   monotonicity, finite/range behavior, equivalence of live and compositor curves,
   portrait/ultrawide/4K image budgeting, malformed image dimensions/byte counts,
-  cancellation/ready races, and one-time opening recovery with retry after failure.
+  cancellation/ready races, one-time opening recovery with retry after failure,
+  minimized-but-visible restoration, safe affinity-query fallback, supported
+  taskbar routing decisions and exclusive source/deadline restore claims.
 - The same portable app-motion checks passed with AddressSanitizer and
   UndefinedBehaviorSanitizer enabled; these sanitizers do not cover Windows code.
 
 The numeric count includes sampled curve/geometry cases. It does not represent
-13,768 independent app integration tests. Portable atomics do not prove actual
+14,387 independent app integration tests. Portable atomics do not prove actual
 Windows compositor, IPC, driver, focus or timing behavior.
 
 The retained taskbar experiment also passes its 348 policy and 52 mocked-adapter
@@ -37,6 +39,13 @@ older taskbar experiment and other animation replacements, then test:
 | Scenario | Required observation |
 | --- | --- |
 | Notepad/browser first launch | Live content fades/scales in; correct focus; no final uncloak flash |
+| Minimized app restored by its taskbar button | Queue/receive/animation logs appear; correct focus; no full-animation wait on the taskbar UI thread |
+| App already visible | Original focus-switch path; no artificial fade or extra restore |
+| Taskbar restore hook unavailable | Explicit log; original taskbar activation still works |
+| Pending restore followed by another taskbar click | New input takes precedence; no stale overlay or replay |
+| App claims restore before deadline | Native deadline fallback cannot issue a second SW_RESTORE |
+| Restore maximized window | Original maximized state preserved, including deadline and repeated-click cases |
+| Unsupported affinity getter on ordinary window | Live reveal is eligible; close capture requires tracked/queried unrestricted state |
 | App with a slow/blank first frame | Visibility recovers; content readiness is not falsely claimed as improved |
 | Close last app window/process | Captured close completes in Explorer after source exit |
 | Close a non-final window | App's other windows remain responsive |

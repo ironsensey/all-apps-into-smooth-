@@ -15,6 +15,36 @@ bool Near(float a,float b,float tolerance=0.0001f) { return std::abs(a-b)<=toler
 }
 int main() {
     using namespace AppMotion;
+    Require(RevealStateMatches(true,true,true),"a minimized window may still have WS_VISIBLE; it must qualify for restore");
+    Require(RevealStateMatches(true,true,false),"an iconic hidden window can be restored");
+    Require(!RevealStateMatches(true,false,true),"ordinary activation is not replayed as restore");
+    Require(!RevealStateMatches(false,true,true),"a minimized app is not classified as a first launch");
+    Require(RevealStateMatches(false,false,false),"hidden non-iconic launch qualifies");
+    Require(!RevealStateMatches(false,false,true),"visible windows do not get a second launch animation");
+    Require(CanRouteRestore(true,true,true,true,false,false),"ready responsive minimized app can route");
+    Require(!CanRouteRestore(true,false,true,true,false,false),"already visible switching stays native");
+    Require(!CanRouteRestore(true,true,false,true,false,false),"unconfirmed source dispatcher stays native");
+    Require(!CanRouteRestore(true,true,true,false,false,false),"missing renderer stays native");
+    Require(!CanRouteRestore(true,true,true,true,true,false),"new click during pending restore is handled natively");
+    Require(!CanRouteRestore(true,true,true,true,false,true),"known hung window stays native");
+    Require(!CanRouteRestore(false,true,true,true,false,false),"disabled feature stays native");
+    Require(DisplayContentAllowed(true,false,0,true,0),"normal new window with unsupported affinity getter can close-animate");
+    Require(!DisplayContentAllowed(true,false,0,false,0),"unknown snapshot permission is never inferred from a failed getter");
+    Require(DisplayContentAllowed(false,false,0,false,0),"live DWM reveal can use compositor-enforced protection without screen capture");
+    Require(!DisplayContentAllowed(true,true,0x11,true,0),"explicit excluded-from-capture setting wins over a cached default");
+    Require(!DisplayContentAllowed(false,false,0,true,0x11),"tracked protected window cannot use a custom live reveal");
+    Require(DisplayContentAllowed(true,true,0,true,0x11),"successful current getter supersedes an old tracked setting");
+    for (int i=0;i<200;++i) {
+        std::atomic<int> state{Pending};
+        bool claimed=false;
+        auto cas=[&](int desired,int expected) { state.compare_exchange_strong(expected,desired); return expected; };
+        std::thread source([&]{ claimed=ClaimRestore(cas); });
+        const bool fallback=ClaimRestoreFallback(cas);
+        source.join();
+        Require(claimed!=fallback,"exactly one of source restore and native deadline fallback may claim the request");
+        Require(state==(claimed ? Started : Cancelled),"restore cancellation has one stable winning state");
+        Require(!ClaimRestore(cas) && !ClaimRestoreFallback(cas),"claimed restore cannot be replayed by either side");
+    }
     struct RecoveryPlatform {
         bool claimed=false,owns=true,uncloakSucceeds=true,preferenceSucceeds=true;
         bool removed=false,released=false;

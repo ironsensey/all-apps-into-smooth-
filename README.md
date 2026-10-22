@@ -2,9 +2,15 @@
 
 **Copy [`native-app-motion.wh.cpp`](native-app-motion.wh.cpp) into Windhawk.**
 
-Version 0.2.0 implements **app opening and closing animations**, recreating the
-familiar Windows scale-and-fade appearance with GPU composition. It replaces the
-earlier taskbar experiment, which did not address app opening/closing.
+Version 0.3.0 implements **app opening, closing and supported taskbar restore
+animations**, recreating a Windows-style scale-and-fade appearance with GPU
+composition. It replaces the earlier taskbar experiment.
+
+This update addresses two concrete gaps: 0.2 did not animate minimized-window
+restores, and its display-affinity eligibility check could silently reject normal
+windows. Failed affinity queries no longer disable live DWM reveals. Screen
+snapshots still require an unrestricted query or a tracked unrestricted setting
+on a window created after injection; protected/unknown snapshots are skipped.
 
 **Experimental, not yet tested on a real Windows desktop.** Cross-compilation and
 portable checks pass. Actual appearance, focus, timing, compatibility and resource
@@ -24,7 +30,9 @@ promise zero stutter, fix every black flash, or make app content render sooner.
 5. Start with defaults. Leave Windows' **Animation effects** enabled under
    Settings > Accessibility > Visual effects.
 
-There are no private-symbol downloads or `dwm.exe` injection requirements.
+The optional taskbar restore hook may download one Microsoft taskbar symbol on
+first use. Missing symbols leave taskbar routing native; other app effects can
+still run. No `dwm.exe` injection is required.
 Disable/remove the mod in Windhawk to remove its hooks and restore windows
 temporarily concealed for an opening animation. No registry preferences are
 written.
@@ -44,18 +52,32 @@ waits only for a bounded preparation handoff, **not the full closing animation**
 Capture and native API execution time are additional costs. A late/failed
 handoff uses the native close.
 
-Minimize, maximize, restore and taskbar click policy remain native. A close or
-minimize during opening cancels that opening before the native operation; it
-does not queue an obsolete animation behind the newer action.
+**Taskbar restore:** for supported minimized windows, Explorer's existing task
+switch routine forwards the restore to the app's confirmed UI dispatcher. The
+default is a 110 ms ease-out with 35% first-frame visibility, providing earlier
+feedback than a completely transparent starting frame. No snapshot or
+animation-completion wait is added to the taskbar thread. An atomic deadline
+protocol prevents a delayed duplicate restore from unmaximizing a window.
+Internal restore APIs within one activation share the accepted request; a newer
+input can cancel unclaimed work. New clicks retain a native path while old work
+is pending. This is not a measured click-to-frame improvement.
+
+Minimize/maximize, switching to an already visible app, and taskbar selection
+policy remain native. A busy app's UI thread and app startup/loading time are
+not accelerated. A close/minimize during a reveal cancels that reveal before
+the newer operation.
 
 ## Customization
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | Animate app opening / closing | Both on | Toggle each transition separately |
+| Animate restoration from the taskbar | On | Enable supported minimized-window restores |
+| Restore duration / first-frame visibility | 110 ms / 35% | Fast-start ease-out; tune the visual feedback |
+| Restore dispatch deadline | 60 ms | Unclaimed work can fall back; claimed requests are not replayed |
 | Opening / closing duration | 150 / 120 ms | Tune perceived pace |
 | Smallest scale | 96% | Subtle Windows-style motion; 100% gives fade only |
-| Motion curve | Smooth | Smooth endpoints, fast-start ease-out, or linear |
+| Opening/closing motion curve | Smooth | Restore uses fast-start ease-out independently |
 | Maximum simultaneous animations | 2 | Limit active renderer work; extra requests fall back |
 | Closing snapshot budget | 4 megapixels | Limit each upload; larger windows are downscaled |
 | Closing handoff wait | 40 ms | Limit how long the app waits for renderer readiness |
@@ -103,6 +125,11 @@ Restart apps after enabling. The mod tracks application writes to the transition
 preference; preferences set before injection may be unknown. Other shell or
 animation replacements are outside this version's supported target.
 
+For taskbar diagnostics, follow [docs/TASKBAR-CHECK.md](docs/TASKBAR-CHECK.md).
+`RESTORE_ANIMATION_STARTED` identifies a submitted custom restore. If it is
+absent, changing animation duration does not fix an inactive restore path: read
+the fallback log first.
+
 See [VALIDATION.md](VALIDATION.md) for executed checks and the pending Windows
 test matrix. The older taskbar source is retained only for history; its
 documentation is in [docs/LEGACY-TASKBAR.md](docs/LEGACY-TASKBAR.md).
@@ -117,3 +144,5 @@ The supplied MIT-licensed *Windows Animations - Fork* by ReDrag informed the
 live-thumbnail/captured-image investigation. This mod uses its own renderer
 broker, transport, lifecycle and animation implementation. Windows API declarations
 and official Windhawk headers are used for compilation and are not redistributed.
+The display-affinity fallback follows the documented limitations of
+[GetWindowDisplayAffinity](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-getwindowdisplayaffinity).
