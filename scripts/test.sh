@@ -8,3 +8,6 @@ mkdir -p build
 "${CXX:-g++}" -std=c++20 -O2 -Wall -Wextra -Werror \
     -Itests/fakes tests/adapter_tests.cpp -o build/adapter-tests
 ./build/adapter-tests
+"${CXX:-g++}" -std=c++20 -O2 -Wall -Wextra -Werror \
+    -pthread tests/motion_tests.cpp -o build/motion-tests
+./build/motion-tests

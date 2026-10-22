@@ -1,116 +1,119 @@
-# Native Smooth Taskbar
+# Native-style App Motion
 
-A Windhawk source mod for the **standard Windows 11 x64 taskbar**, designed to
-keep Windows' original animations and avoid adding a second animation renderer.
+**Copy [`native-app-motion.wh.cpp`](native-app-motion.wh.cpp) into Windhawk.**
 
-**Experimental source release, not yet tested on a Windows desktop.** It cannot
-guarantee jitter-free animation, instant application startup, or a fix for an
-existing black flash. Opening and closing are left to Windows and the application;
-the mod does not accelerate those animations or alter DWM's frame scheduling.
+Version 0.2.0 implements **app opening and closing animations**, recreating the
+familiar Windows scale-and-fade appearance with GPU composition. It replaces the
+earlier taskbar experiment, which did not address app opening/closing.
+
+**Experimental, not yet tested on a real Windows desktop.** Cross-compilation and
+portable checks pass. Actual appearance, focus, timing, compatibility and resource
+use still require Windows testing. This is a custom approximation of Windows'
+visual style, not pixel-identical private Windows transition code. It cannot
+promise zero stutter, fix every black flash, or make app content render sooner.
 
 ## Install
 
-1. Install or open the current version of [Windhawk](https://windhawk.net/).
-2. Choose **Create a new mod**. Replace the entire template with
-   [`native-smooth-taskbar.wh.cpp`](native-smooth-taskbar.wh.cpp).
-3. Select **Compile Mod** and enable it. The first load may need to download
-   Microsoft's taskbar symbols. Enable it after the desktop/taskbar has appeared.
-4. Start with the default settings. Keep **Animation effects** enabled under
-   Windows Settings > Accessibility > Visual effects if you want native motion.
+1. Use current Windhawk on **Windows 11 x64 with the standard Explorer shell**.
+2. Disable the older **Native Smooth Taskbar** mod and other animation replacements.
+3. Choose **Create a new mod** in Windhawk. Replace the whole template with
+   [`native-app-motion.wh.cpp`](native-app-motion.wh.cpp), then **Compile Mod**.
+4. Enable it while Explorer is running. Restart the apps you want to test so the
+   new mod loads in them. Both Explorer's renderer and the source app hooks are
+   required.
+5. Start with defaults. Leave Windows' **Animation effects** enabled under
+   Settings > Accessibility > Visual effects.
 
-If Windhawk logs that `taskbar.dll` is not loaded during Explorer startup,
-disable/re-enable the mod once the taskbar is visible. If required symbols cannot
-be found, the mod stops initialization. There is no pattern-scanning fallback.
+There are no private-symbol downloads or `dwm.exe` injection requirements.
+Disable/remove the mod in Windhawk to remove its hooks and restore windows
+temporarily concealed for an opening animation. No registry preferences are
+written.
 
-Use the standard taskbar. ARM64, ExplorerPatcher, StartAllBack and animation
-replacement mods are outside this release's supported target. Windows 11 build
-numbers can change shell internals; compiling does not establish compatibility
-with every build.
+## What actually runs
 
-## Settings
+**Opening:** the app continues painting into DWM. An Explorer-hosted live thumbnail
+fades/scales in while the real window is temporarily cloaked. Updates follow DWM
+composition boundaries, using a high-resolution progress clock. A one-shot
+watchdog in the app restores visibility if the renderer fails or disappears.
+Failures can reveal the real window immediately without an opening animation.
 
-| Setting | Default | Effect |
+**Closing:** the mod captures an unobscured window once, uploads it once and
+submits GPU scale/opacity curves to DirectComposition. Explorer owns the effect,
+so it can finish even when the app closes its final window and exits. The app
+waits only for a bounded preparation handoff, **not the full closing animation**.
+Capture and native API execution time are additional costs. A late/failed
+handoff uses the native close.
+
+Minimize, maximize, restore and taskbar click policy remain native. A close or
+minimize during opening cancels that opening before the native operation; it
+does not queue an obsolete animation behind the newer action.
+
+## Customization
+
+| Setting | Default | Purpose |
 | --- | --- | --- |
-| Enable taskbar customization | On | Master switch |
-| Click a grouped app | Cycle windows directly | Uses Explorer's native Ctrl+click action without opening the thumbnail chooser first |
-| Click the active app again | Windows default toggle | Optional **Keep active app open** avoids taskbar-click minimization |
-| Hold Ctrl, Shift or Alt for native behavior | On | Temporarily bypasses customization and preserves modified-click behavior |
-| Experimental nonblocking minimize | Off | Converts eligible task-switching `ShowWindow(SW_MINIMIZE)` calls to `ShowWindowAsync` |
-| Experimental nonblocking restore | Off | Converts eligible minimized-window restore calls inside task switching to `ShowWindowAsync(SW_RESTORE)` |
-| Apps excluded from experimental async requests | Empty | Exact executable basenames separated by semicolons; case-insensitive |
-| Diagnostic logging | Off | Records changed requests/fallbacks when Windhawk logging is also enabled |
+| Animate app opening / closing | Both on | Toggle each transition separately |
+| Opening / closing duration | 150 / 120 ms | Tune perceived pace |
+| Smallest scale | 96% | Subtle Windows-style motion; 100% gives fade only |
+| Motion curve | Smooth | Smooth endpoints, fast-start ease-out, or linear |
+| Maximum simultaneous animations | 2 | Limit active renderer work; extra requests fall back |
+| Closing snapshot budget | 4 megapixels | Limit each upload; larger windows are downscaled |
+| Closing handoff wait | 40 ms | Limit how long the app waits for renderer readiness |
+| Release closing GPU resources after idle | 15 seconds | Drop the device/libraries after inactivity; later cold starts can fall back |
+| Animate explicit hides | Off | Optional tray-hide effects |
+| Use native animations on battery | Off | Optional battery-first behavior |
+| Respect Windows animation preferences | On | Honor disabled animation effects |
+| Excluded apps | Empty | Exact executable names separated by semicolons |
+| Diagnostic logging | Off | Identify custom animations and native fallbacks |
 
-Settings changes reload the mod, so no settings mutex runs on the click path.
-Exclusions affect the experimental async settings only, not grouping or keep-open
-behavior. Use names such as `game.exe;editor.exe`, not paths or wildcards.
+Recommended first test: retain defaults. For less work on battery, enable **Use
+native animations on battery**. For tighter texture/CPU-upload limits, reduce the
+snapshot budget or concurrency. The pixel budget limits each image, not all
+driver-managed memory. Resource limits can trade image sharpness or coverage for
+less work.
 
-**Recommended:** retain defaults first. For repeated clicks that should leave an
-app visible, select **Keep active app open**. If you want repeated clicks to
-minimize/restore, retain **Windows default toggle**. No clicks are debounced.
+## Resource design and limits
 
-The async settings trade synchronous behavior for handing work to the app's own
-UI thread. They are not an animation-speed control. Enable **one at a time** and
-test focus, maximized windows, and rapid clicking. A hung app still cannot render
-or process its request. The app may receive focus later. Other shell paths are
-unaffected; diagnostic logs show whether a request actually used this path.
+- GPU device libraries load dynamically **in the Explorer renderer**, not in
+  every injected app. The closing device is released after the configured idle
+  period.
+- Closing curves run in the compositor: no per-frame screenshot or CPU bitmap
+  animation loop.
+- Opening uses a live GPU thumbnail; CPU updates its geometry/opacity only during
+  an active opening. DWM synchronization paces those updates.
+- No global timer-resolution request, busy-spin loop, process-priority boost or
+  permanent idle animation loop is added.
+- Source processes use small one-shot recovery timers. Captured pixels stay in
+  short-lived memory mappings; they are not written to disk or logged.
 
-## Resource behavior and safeguards
+These are implementation properties. **Lower power, CPU/GPU use, RAM use, or
+better frame pacing than native Windows have not been measured or established.**
 
-- Injects into Explorer only, with two shell hooks in the default configuration.
-- Adds no rendering loop, screenshots, overlays, polling worker, per-frame work,
-  high-resolution timer request, or CPU/GPU priority adjustment.
-- Adds no animation queue or animation-completion delay.
-- Async hooks are installed only when their settings are enabled.
-- Unknown, owned/modal, cloaked, tool and Explorer-owned windows use the original
-  API path. Restore requests for non-minimized windows also use the original path,
-  preserving maximized-window semantics.
-- A failed async submission falls back to the original API. An accepted request
-  is not resubmitted. `ShowWindow`'s previous-visibility return value is preserved.
-- The mod does not write registry preferences, force-enable accessibility effects,
-  disable VSync, change display refresh rate, or hook `dwm.exe`.
+## Coverage and fallback
 
-These are implementation properties, **not measured latency, battery, RAM or FPS
-improvements**. Native Windows animation still uses CPU/GPU resources. The actual
-benefit depends on the app, taskbar path, hardware and Windows build.
+First shows through `ShowWindow`/`SetWindowPos` and closes through `DestroyWindow`
+are intercepted. Nonactivating/background first shows, minimized launches,
+elevated/sandboxed/protected processes, foreign-thread operations, owned/modal or
+layered windows, offscreen/overlapped close captures, other APIs and direct process
+termination can remain native or skip the custom effect. Do not expect universal
+coverage of every app. Unsupported thumbnail rendering may also need a per-app
+exclusion or disabling opening effects after Windows testing.
 
-## Validation
+Restart apps after enabling. The mod tracks application writes to the transition
+preference; preferences set before injection may be unknown. Other shell or
+animation replacements are outside this version's supported target.
 
-See [VALIDATION.md](VALIDATION.md) for executed checks, their limits and the Windows
-test matrix. Portable tests run with:
+See [VALIDATION.md](VALIDATION.md) for executed checks and the pending Windows
+test matrix. The older taskbar source is retained only for history; its
+documentation is in [docs/LEGACY-TASKBAR.md](docs/LEGACY-TASKBAR.md).
 
-```sh
-./scripts/test.sh
-```
+## Development and reference
 
-A separate cross-build check accepts a MinGW C++ compiler and headers from the
-official Windhawk source checkout. It builds a Windows object and links a DLL
-against an import library generated from Windhawk's real export declarations:
+Run `./scripts/test.sh`. `scripts/cross-build.sh` accepts `MINGW_CXX`,
+`MINGW_DLLTOOL` and `WINDHAWK_SOURCE` (the official Windhawk checkout). Generated
+DLLs are link-validation artifacts; install the source through Windhawk.
 
-```sh
-MINGW_CXX=/path/to/x86_64-w64-mingw32-g++ \
-MINGW_DLLTOOL=/path/to/x86_64-w64-mingw32-dlltool \
-WINDHAWK_SOURCE=/path/to/windhawk ./scripts/cross-build.sh
-```
-
-That DLL is a validation artifact. Install the source through Windhawk, which
-provides its own compiler, engine import library and module registration.
-
-## Remove
-
-Disable/remove this mod in Windhawk. No registry settings need reverting. A
-window request accepted immediately before disabling may finish normally.
-
-## Reference and provenance
-
-The supplied *Windows Animations - Fork* reference was inspected for context;
-none of its renderer, capture, cloaking or animation code was copied. Because
-that reference mod was not installed on the user's PC, it cannot explain their
-existing flash.
-
-Explorer symbol names, signatures and click-action constants were checked against
-the published Windhawk
-[taskbar-left-click-cycle](https://github.com/ramensoftware/windhawk-mods/blob/main/mods/taskbar-left-click-cycle.wh.cpp)
-and
-[taskbar-no-minimize](https://github.com/ramensoftware/windhawk-mods/blob/main/mods/taskbar-no-minimize.wh.cpp)
-sources. This mod has its own implementation and tests. Windows API declarations
-and Windhawk API headers are used for compilation; SDK files are not redistributed.
+The supplied MIT-licensed *Windows Animations - Fork* by ReDrag informed the
+live-thumbnail/captured-image investigation. This mod uses its own renderer
+broker, transport, lifecycle and animation implementation. Windows API declarations
+and official Windhawk headers are used for compilation and are not redistributed.
